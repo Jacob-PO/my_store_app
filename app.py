@@ -5,187 +5,143 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import time
+import json
 
-# 페이지 설정
-st.set_page_config(
-    page_title="Store Search", 
-    page_icon="🏪",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom CSS for Apple-like styling
-st.markdown("""
-<style>
-    /* 전체 폰트 스타일링 */
-    @import url('https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@400;500;600&display=swap');
-    
-    html, body, [class*="css"] {
-        font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
-    }
-    
-    /* 메인 컨테이너 스타일링 */
-    .main {
-        background-color: #f5f5f7;
-        border-radius: 20px;
-        padding: 2rem;
-    }
-    
-    /* 헤더 스타일링 */
-    h1 {
-        font-weight: 600 !important;
-        font-size: 2.5rem !important;
-        color: #1d1d1f !important;
-        margin-bottom: 1.5rem !important;
-    }
-    
-    h2 {
-        font-weight: 500 !important;
-        color: #1d1d1f !important;
-        font-size: 1.8rem !important;
-    }
-    
-    /* 버튼 스타일링 */
-    .stButton > button {
-        background-color: #0071e3 !important;
-        color: white !important;
-        border-radius: 20px !important;
-        padding: 0.5rem 2rem !important;
-        border: none !important;
-        font-weight: 500 !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    .stButton > button:hover {
-        background-color: #0077ED !important;
-        transform: scale(1.02);
-    }
-    
-    /* 입력 필드 스타일링 */
-    .stTextInput > div > div > input {
-        border-radius: 10px !important;
-        border: 1px solid #d2d2d7 !important;
-        padding: 0.5rem 1rem !important;
-        background-color: white !important;
-    }
-    
-    /* 데이터프레임 스타일링 */
-    .dataframe {
-        border-radius: 10px !important;
-        border: none !important;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
-    }
-    
-    /* 탭 스타일링 */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: #f5f5f7;
-        border-radius: 15px;
-        padding: 0.5rem;
-    }
-
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 10px;
-        padding: 10px 20px;
-        background-color: white;
-    }
-
-    .stTabs [data-baseweb="tab-panel"] {
-        padding: 1rem 0;
-    }
-    
-    /* 카드 스타일링 */
-    div[data-testid="stExpander"] {
-        border-radius: 15px !important;
-        border: none !important;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
-        margin-bottom: 1rem !important;
-    }
-    
-    /* 프로그레스 바 스타일링 */
-    div.stProgress > div > div {
-        background-color: #0071e3 !important;
-        border-radius: 10px !important;
-    }
-    
-    /* Plotly 차트 스타일링 */
-    .js-plotly-plot {
-        border-radius: 15px !important;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Session state 초기화
-if 'search_history' not in st.session_state:
-    st.session_state.search_history = []
-if 'active_tab' not in st.session_state:
-    st.session_state.active_tab = "search"
+# 지역별 중심 좌표 정의
+REGION_COORDS = {
+    "서울": [
+        "127.0016985;37.5642135",  # 중구
+        "127.0495556;37.5838012",  # 동대문구
+        "127.0817589;37.5492077",  # 광진구
+        "127.0147000;37.5757637",  # 종로구
+        "126.9897140;37.5562557",  # 용산구
+        "126.9139242;37.5492077",  # 마포구
+        "127.0363456;37.6016745",  # 성동구
+        "127.0232185;37.6176125",  # 동대문구
+        "127.0495556;37.6397533",  # 중랑구
+        "127.1464824;37.6024380",  # 강동구
+        "127.1258639;37.5492077",  # 송파구
+        "127.0927015;37.5184097",  # 강남구
+        "126.9810742;37.5177624",  # 용산구
+        "126.9139242;37.5270616",  # 마포구
+    ],
+    "부산": [
+        "129.0756416;35.1795543",
+        "129.0364044;35.1547153",
+        "129.0756416;35.1295663"
+    ],
+    "대구": [
+        "128.5911940;35.8714354",
+        "128.6019569;35.8241179",
+        "128.5517936;35.8241179"
+    ],
+    "인천": [
+        "126.7052062;37.4562557",
+        "126.6575060;37.4562557",
+        "126.7052062;37.4786440"
+    ],
+    "광주": [
+        "126.8526012;35.1595454",
+        "126.8914954;35.1595454",
+        "126.8526012;35.1847107"
+    ],
+    "대전": [
+        "127.3845475;36.3504119",
+        "127.4205666;36.3504119",
+        "127.3845475;36.3240685"
+    ]
+}
 
 def get_store_data(query, search_coord, page=1):
     """네이버 지도 API로부터 데이터를 가져오는 함수"""
-    cookies = {
-        'NACT': '1',
-        'NNB': '6AFU7H2YFVCGO',
-        'ASID': '7329cb35000001937543587e0000006e',
-        'NAC': 'LtUNBcQWCmCC',
-        'NACT': '1',
-        'SRT30': '1735978428',
-        'SRT5': '1735978428',
-        'BUC': 'F03Qm0vZYzmIJmR0ikQUPOkmCJ6-9dRlvlFDVy03dPE=',
-    }
+    try:
+        headers = {
+            'accept': 'application/json, text/plain, */*',
+            'accept-language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+            'referer': 'https://map.naver.com/',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
 
-    headers = {
-        'accept': 'application/json, text/plain, */*',
-        'accept-language': 'ko-KR,ko;q=0.8,en-US;q=0.6,en;q=0.4',
-        'cache-control': 'no-cache',
-        'referer': 'https://map.naver.com/',
-        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    }
+        params = {
+            'query': query,
+            'type': 'all',
+            'searchCoord': search_coord,
+            'page': page,
+            'displayCount': 100
+        }
 
-    params = {
-        'query': query,
-        'type': 'all',
-        'searchCoord': search_coord,
-        'page': page,
-    }
-
-    response = requests.get(
-        'https://map.naver.com/p/api/search/allSearch',
-        params=params,
-        cookies=cookies,
-        headers=headers
-    )
-    
-    return response.json()
+        response = requests.get(
+            'https://map.naver.com/p/api/search/allSearch',
+            params=params,
+            headers=headers
+        )
+        
+        data = response.json()
+        
+        if not data.get('result', {}).get('place', {}).get('list'):
+            return None
+        
+        return data
+    except Exception as e:
+        st.error(f"데이터 수집 오류: {str(e)}")
+        return None
 
 def process_store_data(data):
     """API 응답 데이터를 처리하는 함수"""
-    stores = []
+    if not data or not isinstance(data, dict):
+        return []
     
-    for store in data['result']['place']['list']:
-        business_status = store.get('businessStatus', {})
-        status = business_status.get('status', {})
+    result = data.get('result', {})
+    if not result or not isinstance(result, dict):
+        return []
+    
+    place_data = result.get('place', {})
+    if not place_data or not isinstance(place_data, dict):
+        return []
+    
+    store_list = place_data.get('list', [])
+    if not store_list or not isinstance(store_list, list):
+        return []
         
-        store_info = {
-            'name': store.get('name', ''),
-            'tel': store.get('tel', ''),
-            'category': ','.join(store.get('category', [])),
-            'address': store.get('address', ''),
-            'road_address': store.get('roadAddress', ''),
-            'business_status': status.get('text', ''),
-            'business_hours': business_status.get('businessHours', ''),
-        }
-        stores.append(store_info)
+    stores = []
+    for store in store_list:
+        try:
+            if not isinstance(store, dict):
+                continue
+                
+            business_status = store.get('businessStatus', {})
+            if not isinstance(business_status, dict):
+                business_status = {}
+                
+            status = business_status.get('status', {})
+            if not isinstance(status, dict):
+                status = {}
+            
+            category = store.get('category', [])
+            if isinstance(category, list):
+                category_str = ','.join(category)
+            else:
+                category_str = str(category) if category else ''
+            
+            store_info = {
+                'name': str(store.get('name', '')),
+                'tel': str(store.get('tel', '')),
+                'category': category_str,
+                'address': str(store.get('address', '')),
+                'road_address': str(store.get('roadAddress', '')),
+                'business_status': str(status.get('text', '영업 상태 미상')),
+                'business_hours': str(business_status.get('businessHours', '')),
+                'x': str(store.get('x', '')),
+                'y': str(store.get('y', ''))
+            }
+            stores.append(store_info)
+        except Exception as e:
+            continue
     
     return stores
 
-def create_charts(df, chart_id):
+def create_charts(df):
     """차트 생성 함수"""
-    # 테마에 따른 색상 설정
-    bg_color = "#1e1e1e" if st.session_state.dark_mode else "#ffffff"
-    text_color = "#ffffff" if st.session_state.dark_mode else "#1d1d1f"
-    
     # 영업 상태 차트
     status_counts = df['business_status'].value_counts()
     fig_status = go.Figure(data=[go.Pie(
@@ -197,10 +153,7 @@ def create_charts(df, chart_id):
     
     fig_status.update_layout(
         title="영업 상태 분포",
-        showlegend=True,
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        height=400
+        showlegend=True
     )
 
     # 카테고리 차트
@@ -213,111 +166,146 @@ def create_charts(df, chart_id):
     )])
     
     fig_category.update_layout(
-        title="주요 카테고리",
-        showlegend=False,
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        height=400
+        title="상위 10개 카테고리",
+        showlegend=False
     )
     
     return fig_status, fig_category
 
-def main():
-    st.title("Store Search")
+def search_all_regions(query, progress_bar, status_text):
+    """모든 지역에서 검색을 수행하는 함수"""
+    all_stores = []
+    total_regions = sum(len(coords) for coords in REGION_COORDS.values())
+    current_region = 0
     
-    # 탭 생성
-    tabs = st.tabs(["🔍 Search", "📋 History"])
-    
-    # Search 탭
-    with tabs[0]:
-        col1, col2 = st.columns([3, 1])
-        
-        with col2:
-            st.markdown("### Search Settings")
-            search_query = st.text_input("Search Query", value="서울시 휴대폰 대리점")
-            search_coord = st.text_input("Coordinates", value="126.921051;37.634983")
-            pages = st.slider("Number of Pages", 1, 10, 5)
+    for region_name, coords_list in REGION_COORDS.items():
+        for coord in coords_list:
+            current_region += 1
+            page = 1
             
-            if st.button("Search", use_container_width=True):
-                with col1:
-                    st.markdown("### Search Progress")
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
+            while True:
+                status_text.text(f"📍 {region_name} 지역 검색 중 (페이지 {page})...")
+                progress_bar.progress(current_region / total_regions)
+                
+                response_data = get_store_data(query, coord, page)
+                if not response_data:
+                    break
                     
-                    # 데이터 수집
-                    all_stores = []
-                    for page in range(1, pages + 1):
-                        try:
-                            status_text.text(f"Collecting page {page}/{pages}...")
-                            response_data = get_store_data(search_query, search_coord, page)
-                            stores = process_store_data(response_data)
-                            all_stores.extend(stores)
-                            progress_bar.progress(page/pages)
-                            time.sleep(0.5)
-                        except Exception as e:
-                            st.error(f"Error on page {page}: {str(e)}")
-                            continue
+                stores = process_store_data(response_data)
+                if not stores:
+                    break
                     
-                    # 결과 처리
-                    df = pd.DataFrame(all_stores)
-                    
-                    # 검색 기록 저장
-                    st.session_state.search_history.append({
-                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        'query': search_query,
-                        'data': df
-                    })
-                    
-                    # 결과 표시
-                    st.markdown(f"### Results ({len(df)} stores found)")
-                    st.dataframe(df, height=300)
-                    
-                    # 차트 표시
-                    fig_status, fig_category = create_charts(df)
-                    
-                    col_charts1, col_charts2 = st.columns(2)
-                    with col_charts1:
-                        st.plotly_chart(fig_status, use_container_width=True, key=f"status_chart_{datetime.now().timestamp()}")
-                    with col_charts2:
-                        st.plotly_chart(fig_category, use_container_width=True, key=f"category_chart_{datetime.now().timestamp()}")
-                    
-                    # CSV 다운로드
-                    csv = df.to_csv(index=False, encoding='utf-8-sig')
-                    st.download_button(
-                        "Download CSV",
-                        csv,
-                        f"store_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        "text/csv",
-                        use_container_width=True
-                    )
+                all_stores.extend(stores)
+                page += 1
+                
+                time.sleep(0.5)  # API 호출 간격 조절
     
-    # History 탭
-    with tabs[1]:
-        if not st.session_state.search_history:
-            st.info("No search history yet. Try searching something!")
-        else:
-            for idx, record in enumerate(reversed(st.session_state.search_history)):
-                with st.expander(f"🔍 {record['query']} ({record['timestamp']})"):
-                    df_history = record['data']
-                    st.dataframe(df_history, height=200)
-                    
-                    col_hist1, col_hist2 = st.columns(2)
-                    fig_status, fig_category = create_charts(df_history)
-                    
-                    with col_hist1:
-                        st.plotly_chart(fig_status, use_container_width=True, key=f"history_status_{idx}_{datetime.now().timestamp()}")
-                    with col_hist2:
-                        st.plotly_chart(fig_category, use_container_width=True, key=f"history_category_{idx}_{datetime.now().timestamp()}")
-                    
-                    # CSV 다운로드
-                    csv_history = df_history.to_csv(index=False, encoding='utf-8-sig')
-                    st.download_button(
-                        "Download CSV",
-                        csv_history,
-                        f"search_history_{record['timestamp'].replace(' ', '_')}.csv",
-                        "text/csv",
-                        use_container_width=True
-                    )
+    return all_stores
+
+def main():
+    st.set_page_config(page_title="Store Search Pro", page_icon="📊", layout="wide")
+    
+    if 'dark_mode' not in st.session_state:
+        st.session_state.dark_mode = False
+    
+    col_title, col_theme = st.columns([4, 1])
+    with col_title:
+        st.title("📊 Store Search Pro")
+    with col_theme:
+        st.session_state.dark_mode = st.toggle('다크 모드', value=st.session_state.dark_mode)
+    
+    # 검색 인터페이스
+    with st.container():
+        col1, col2 = st.columns([4, 1])
+        
+        with col1:
+            search_query = st.text_input(
+                "🔍 검색어",
+                placeholder="검색어를 입력하세요",
+                key="search_query"
+            )
+        with col2:
+            search_button = st.button("🔍 검색", use_container_width=True)
+
+        if search_button and search_query:
+            progress_container = st.empty()
+            status_text = st.empty()
+            progress_bar = progress_container.progress(0)
+            
+            # 전국 검색 수행
+            with st.spinner('데이터 수집 중...'):
+                all_stores = search_all_regions(search_query, progress_bar, status_text)
+            
+            if all_stores:
+                # 데이터프레임 생성 및 중복 제거
+                df = pd.DataFrame(all_stores).drop_duplicates(subset=['name', 'address'])
+                
+                # 검색 기록 저장
+                if 'search_history' not in st.session_state:
+                    st.session_state.search_history = []
+                
+                search_record = {
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'query': search_query,
+                    'data': df
+                }
+                
+                st.session_state.search_history.append(search_record)
+                
+                # 결과 표시
+                status_text.text(f"✅ 검색 완료: 총 {len(df)}개 매장 발견")
+                
+                # 데이터 테이블 표시
+                st.markdown(f"### 📊 검색 결과 ({len(df)} 개 매장)")
+                with st.expander("📋 데이터 테이블", expanded=True):
+                    st.dataframe(df, height=400, use_container_width=True)
+                
+                # 차트 표시
+                col_charts1, col_charts2 = st.columns(2)
+                fig_status, fig_category = create_charts(df)
+                
+                with col_charts1:
+                    st.plotly_chart(fig_status, use_container_width=True)
+                with col_charts2:
+                    st.plotly_chart(fig_category, use_container_width=True)
+                
+                # CSV 다운로드
+                st.download_button(
+                    "📥 CSV 다운로드",
+                    df.to_csv(index=False, encoding='utf-8-sig'),
+                    f"store_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    "text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.warning("검색 결과가 없습니다.")
+        
+        elif search_button and not search_query:
+            st.warning("검색어를 입력해주세요.")
+    
+    # 검색 기록 표시
+    if 'search_history' in st.session_state and st.session_state.search_history:
+        st.markdown("### 📜 검색 기록")
+        
+        for idx, record in enumerate(reversed(st.session_state.search_history)):
+            with st.expander(f"🔍 {record['query']} ({record['timestamp']})", expanded=False):
+                st.dataframe(record['data'], height=200)
+                
+                col_hist1, col_hist2 = st.columns(2)
+                fig_status, fig_category = create_charts(record['data'])
+                
+                with col_hist1:
+                    st.plotly_chart(fig_status, use_container_width=True)
+                with col_hist2:
+                    st.plotly_chart(fig_category, use_container_width=True)
+                
+                st.download_button(
+                    "📥 기록 데이터 다운로드",
+                    record['data'].to_csv(index=False, encoding='utf-8-sig'),
+                    f"search_history_{record['timestamp'].replace(' ', '_')}.csv",
+                    "text/csv",
+                    use_container_width=True
+                )
 
 if __name__ == "__main__":
     main()
