@@ -5,56 +5,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import time
-import numpy as np
-from math import radians, sin, cos, sqrt, atan2
 
-def haversine_distance(lat1, lon1, lat2, lon2):
-    """두 지점 간의 거리를 계산하는 함수 (단위: km)"""
-    R = 6371  # 지구의 반경(km)
-    
-    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    c = 2 * atan2(sqrt(a), sqrt(1-a))
-    distance = R * c
-    
-    return distance
-
-def get_area_bounds(center_lat, center_lon, radius_km):
-    """주어진 중심점과 반경으로 검색 영역의 경계를 계산"""
-    # 위도 1도 = 약 111km
-    # 경도 1도 = 약 111km * cos(위도)
-    lat_change = radius_km / 111.0
-    lon_change = radius_km / (111.0 * cos(radians(center_lat)))
-    
-    return {
-        'min_lat': center_lat - lat_change,
-        'max_lat': center_lat + lat_change,
-        'min_lon': center_lon - lon_change,
-        'max_lon': center_lon + lon_change
-    }
-
-def divide_area(bounds, divisions=2):
-    """검색 영역을 더 작은 구역으로 분할"""
-    lat_step = (bounds['max_lat'] - bounds['min_lat']) / divisions
-    lon_step = (bounds['max_lon'] - bounds['min_lon']) / divisions
-    
-    areas = []
-    for i in range(divisions):
-        for j in range(divisions):
-            area = {
-                'min_lat': bounds['min_lat'] + (i * lat_step),
-                'max_lat': bounds['min_lat'] + ((i + 1) * lat_step),
-                'min_lon': bounds['min_lon'] + (j * lon_step),
-                'max_lon': bounds['min_lon'] + ((j + 1) * lon_step)
-            }
-            areas.append(area)
-    
-    return areas
-
-def get_store_data(query, search_coord, page=1):
+def get_store_data(query, page=1):
     """네이버 지도 API로부터 데이터를 가져오는 함수"""
     try:
         headers = {
@@ -67,12 +19,12 @@ def get_store_data(query, search_coord, page=1):
         params = {
             'query': query,
             'type': 'all',
-            'searchCoord': search_coord,
             'page': page,
+            'displayCount': 100  # 페이지당 결과 수 증가
         }
 
         response = requests.get(
-            'https://map.naver.com/p/api/search/allSearch',
+            'https://map.naver.com/v5/api/search',
             params=params,
             headers=headers
         )
@@ -101,13 +53,11 @@ def process_store_data(data):
             store_info = {
                 'name': store.get('name', ''),
                 'tel': store.get('tel', ''),
-                'category': ','.join(store.get('category', [])),
+                'category': ','.join(store.get('category', [])) if isinstance(store.get('category'), list) else store.get('category', ''),
                 'address': store.get('address', ''),
                 'road_address': store.get('roadAddress', ''),
                 'business_status': status.get('text', '영업 상태 미상'),
                 'business_hours': business_status.get('businessHours', ''),
-                'latitude': store.get('y', ''),
-                'longitude': store.get('x', ''),
             }
             stores.append(store_info)
     except Exception as e:
@@ -115,47 +65,47 @@ def process_store_data(data):
     
     return stores
 
-def search_area(query, area, progress_bar, status_text, total_areas, current_area):
-    """특정 영역에 대한 검색을 수행"""
-    center_lat = (area['min_lat'] + area['max_lat']) / 2
-    center_lon = (area['min_lon'] + area['max_lon']) / 2
-    search_coord = f"{center_lon};{center_lat}"
+def create_charts(df, chart_id):
+    """차트 생성 함수"""
+    # 테마에 따른 색상 설정
+    bg_color = "#1e1e1e" if st.session_state.dark_mode else "#ffffff"
+    text_color = "#ffffff" if st.session_state.dark_mode else "#1d1d1f"
     
-    all_stores = []
-    page = 1
+    # 영업 상태 차트
+    status_counts = df['business_status'].value_counts()
+    fig_status = go.Figure(data=[go.Pie(
+        labels=status_counts.index,
+        values=status_counts.values,
+        hole=.4,
+        marker_colors=['#34C759', '#FF9500', '#FF3B30']
+    )])
     
-    while True:
-        status_text.text(f"구역 {current_area}/{total_areas} - 페이지 {page} 수집 중...")
-        
-        response_data = get_store_data(query, search_coord, page)
-        if not response_data:
-            break
-            
-        stores = process_store_data(response_data)
-        if not stores:
-            break
-            
-        # 결과 필터링 (해당 구역 내의 결과만 포함)
-        filtered_stores = []
-        for store in stores:
-            try:
-                lat = float(store['latitude'])
-                lon = float(store['longitude'])
-                if (area['min_lat'] <= lat <= area['max_lat'] and 
-                    area['min_lon'] <= lon <= area['max_lon']):
-                    filtered_stores.append(store)
-            except (ValueError, TypeError):
-                continue
-                
-        all_stores.extend(filtered_stores)
-        
-        if page >= 20:  # API 한도
-            break
-            
-        page += 1
-        time.sleep(0.5)  # API 호출 간격
-        
-    return all_stores
+    fig_status.update_layout(
+        title="영업 상태 분포",
+        paper_bgcolor=bg_color,
+        plot_bgcolor=bg_color,
+        font_color=text_color,
+        showlegend=True
+    )
+
+    # 카테고리 차트
+    category_counts = df['category'].value_counts().head(10)
+    fig_category = go.Figure(data=[go.Bar(
+        x=category_counts.values,
+        y=category_counts.index,
+        orientation='h',
+        marker_color='#0071e3'
+    )])
+    
+    fig_category.update_layout(
+        title="상위 10개 카테고리",
+        paper_bgcolor=bg_color,
+        plot_bgcolor=bg_color,
+        font_color=text_color,
+        showlegend=False
+    )
+    
+    return fig_status, fig_category
 
 def main():
     # UI 설정
@@ -173,54 +123,51 @@ def main():
     
     # 검색 인터페이스
     with st.container():
-        col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+        col1, col2 = st.columns([4, 1])
         
         with col1:
-            search_query = st.text_input("🔍 검색어", value="서울시 휴대폰 대리점", key="search_query")
+            search_query = st.text_input("🔍 검색어", value="서울시 휴대폰 대리점", key="search_query",
+                                       placeholder="검색어를 입력하세요")
         with col2:
-            base_coord = st.text_input("📍 중심 좌표", value="126.921051;37.634983", key="search_coord")
-        with col3:
-            search_radius = st.number_input("검색 반경(km)", min_value=1, max_value=50, value=5, key="search_radius")
-        with col4:
             search_button = st.button("🔍 검색", use_container_width=True, key="search_button")
 
-        if search_button:
-            try:
-                # 중심 좌표 파싱
-                center_lon, center_lat = map(float, base_coord.split(';'))
-                
-                # 검색 영역 계산
-                bounds = get_area_bounds(center_lat, center_lon, search_radius)
-                
-                # 영역 분할 (4x4 그리드)
-                areas = divide_area(bounds, divisions=4)
-                
-                # 진행 상황 표시
-                progress_container = st.empty()
-                status_text = st.empty()
-                progress_bar = progress_container.progress(0)
-                
-                # 전체 결과 저장
-                all_results = []
-                
-                # 각 구역별 검색 수행
-                for idx, area in enumerate(areas, 1):
-                    area_results = search_area(
-                        search_query, 
-                        area, 
-                        progress_bar,
-                        status_text,
-                        len(areas),
-                        idx
-                    )
-                    all_results.extend(area_results)
-                    progress_bar.progress(idx / len(areas))
+        if search_button and search_query:
+            # 진행 상황 표시
+            progress_container = st.empty()
+            status_text = st.empty()
+            progress_bar = progress_container.progress(0)
+            
+            # 데이터 수집
+            all_stores = []
+            page = 1
+            max_pages = 45  # 최대 페이지 수 설정
+            
+            with st.spinner('데이터 수집 중...'):
+                while True:
+                    status_text.text(f"📥 {page}페이지 수집 중...")
                     
-                # 중복 제거
-                df = pd.DataFrame(all_results).drop_duplicates(subset=['name', 'address'])
-                
-                # 결과 표시
-                status_text.text(f"✅ 검색 완료: 총 {len(df)} 개의 매장 발견")
+                    response_data = get_store_data(search_query, page)
+                    if not response_data:
+                        break
+                        
+                    stores = process_store_data(response_data)
+                    if not stores:
+                        break
+                        
+                    all_stores.extend(stores)
+                    progress = min(page/max_pages, 1.0)
+                    progress_bar.progress(progress)
+                    
+                    if page >= max_pages:
+                        status_text.text(f"✅ 최대 페이지 도달: {len(all_stores)}개 매장 수집 완료")
+                        break
+                        
+                    page += 1
+                    time.sleep(0.5)  # API 호출 간격 조절
+            
+            if all_stores:
+                # 결과를 DataFrame으로 변환
+                df = pd.DataFrame(all_stores).drop_duplicates()
                 
                 # 검색 기록 저장
                 if 'search_history' not in st.session_state:
@@ -251,30 +198,14 @@ def main():
                         use_container_width=True
                     )
                 
-                # 시각화
+                # 차트 표시
                 col_charts1, col_charts2 = st.columns(2)
+                fig_status, fig_category = create_charts(df, 'current')
                 
                 with col_charts1:
-                    # 영업 상태 분포
-                    status_counts = df['business_status'].value_counts()
-                    fig_status = go.Figure(data=[go.Pie(
-                        labels=status_counts.index,
-                        values=status_counts.values,
-                        hole=.4
-                    )])
-                    fig_status.update_layout(title="영업 상태 분포")
-                    st.plotly_chart(fig_status, use_container_width=True)
-                
+                    st.plotly_chart(fig_status, use_container_width=True, key=f"status_current")
                 with col_charts2:
-                    # 카테고리 분포
-                    category_counts = df['category'].value_counts().head(10)
-                    fig_category = go.Figure(data=[go.Bar(
-                        x=category_counts.values,
-                        y=category_counts.index,
-                        orientation='h'
-                    )])
-                    fig_category.update_layout(title="상위 10개 카테고리")
-                    st.plotly_chart(fig_category, use_container_width=True)
+                    st.plotly_chart(fig_category, use_container_width=True, key=f"category_current")
                 
                 # CSV 다운로드
                 st.download_button(
@@ -284,9 +215,35 @@ def main():
                     "text/csv",
                     use_container_width=True
                 )
-            
-            except Exception as e:
-                st.error(f"검색 중 오류가 발생했습니다: {str(e)}")
+            else:
+                st.warning("검색 결과가 없습니다.")
+        elif search_button and not search_query:
+            st.warning("검색어를 입력해주세요.")
+    
+    # 검색 기록 표시
+    if 'search_history' in st.session_state and st.session_state.search_history:
+        st.markdown("### 📜 검색 기록")
+        
+        for idx, record in enumerate(reversed(st.session_state.search_history)):
+            with st.expander(f"🔍 {record['query']} ({record['timestamp']})", expanded=False):
+                st.dataframe(record['data'], height=200)
+                
+                col_hist1, col_hist2 = st.columns(2)
+                fig_status, fig_category = create_charts(record['data'], f'history_{idx}')
+                
+                with col_hist1:
+                    st.plotly_chart(fig_status, use_container_width=True, key=f"status_history_{idx}")
+                with col_hist2:
+                    st.plotly_chart(fig_category, use_container_width=True, key=f"category_history_{idx}")
+                
+                st.download_button(
+                    "📥 기록 데이터 다운로드",
+                    record['data'].to_csv(index=False, encoding='utf-8-sig'),
+                    f"search_history_{record['timestamp'].replace(' ', '_')}.csv",
+                    "text/csv",
+                    use_container_width=True,
+                    key=f"download_history_{idx}"
+                )
 
 if __name__ == "__main__":
     main()
