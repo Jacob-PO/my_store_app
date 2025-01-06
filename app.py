@@ -13,18 +13,19 @@ def get_store_data(query, page=1):
             'accept': 'application/json, text/plain, */*',
             'accept-language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
             'referer': 'https://map.naver.com/',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
 
         params = {
             'query': query,
             'type': 'all',
             'page': page,
-            'displayCount': 100  # 페이지당 결과 수 증가
+            'searchCoord': '126.97828899999999;37.566778',  # 서울 중심 좌표
+            'display': 100  # 페이지당 결과 수 증가
         }
 
         response = requests.get(
-            'https://map.naver.com/v5/api/search',
+            'https://map.naver.com/p/api/search/allSearch',
             params=params,
             headers=headers
         )
@@ -41,27 +42,56 @@ def get_store_data(query, page=1):
 
 def process_store_data(data):
     """API 응답 데이터를 처리하는 함수"""
-    if not data or 'result' not in data:
+    if not data or not isinstance(data, dict):
+        return []
+    
+    result = data.get('result', {})
+    if not result or not isinstance(result, dict):
+        return []
+    
+    place_data = result.get('place', {})
+    if not place_data or not isinstance(place_data, dict):
+        return []
+    
+    store_list = place_data.get('list', [])
+    if not store_list or not isinstance(store_list, list):
         return []
         
     stores = []
     try:
-        for store in data['result']['place']['list']:
+        for store in store_list:
+            if not isinstance(store, dict):
+                continue
+                
             business_status = store.get('businessStatus', {})
+            if not isinstance(business_status, dict):
+                business_status = {}
+                
             status = business_status.get('status', {})
+            if not isinstance(status, dict):
+                status = {}
+            
+            category = store.get('category', [])
+            if isinstance(category, list):
+                category_str = ','.join(category)
+            else:
+                category_str = str(category) if category else ''
             
             store_info = {
-                'name': store.get('name', ''),
-                'tel': store.get('tel', ''),
-                'category': ','.join(store.get('category', [])) if isinstance(store.get('category'), list) else store.get('category', ''),
-                'address': store.get('address', ''),
-                'road_address': store.get('roadAddress', ''),
-                'business_status': status.get('text', '영업 상태 미상'),
-                'business_hours': business_status.get('businessHours', ''),
+                'name': str(store.get('name', '')),
+                'tel': str(store.get('tel', '')),
+                'category': category_str,
+                'address': str(store.get('address', '')),
+                'road_address': str(store.get('roadAddress', '')),
+                'business_status': str(status.get('text', '영업 상태 미상')),
+                'business_hours': str(business_status.get('businessHours', '')),
+                'x': str(store.get('x', '')),
+                'y': str(store.get('y', ''))
             }
             stores.append(store_info)
     except Exception as e:
         st.error(f"데이터 처리 중 오류 발생: {str(e)}")
+        st.error(f"문제가 발생한 데이터: {store}")
     
     return stores
 
