@@ -258,11 +258,29 @@ def main():
                 st.markdown(f"### 📊 검색 결과 ({len(df)} 개 매장)")
                 
                 with st.expander("📋 데이터 테이블", expanded=True):
+                    # 데이터프레임 기본 스타일 적용
+                    styled_df = df.style.set_properties(**{
+                        'background-color': 'transparent',
+                        'color': 'black' if not st.session_state.dark_mode else 'white',
+                        'font-family': '-apple-system, BlinkMacSystemFont, sans-serif',
+                        'font-size': '14px',
+                        'padding': '8px'
+                    })
+                    
+                    # 테이블 헤더 스타일 적용
+                    styled_df = styled_df.set_table_styles([
+                        {'selector': 'th',
+                         'props': [
+                             ('background-color', '#f8f9fa' if not st.session_state.dark_mode else '#2d2d2d'),
+                             ('color', 'black' if not st.session_state.dark_mode else 'white'),
+                             ('font-weight', 'bold'),
+                             ('padding', '12px'),
+                             ('text-align', 'left')
+                         ]}
+                    ])
+                    
                     st.dataframe(
-                        df.style.set_properties(**{
-                            'background-color': 'var(--background-color)',
-                            'color': 'var(--text-color)'
-                        }),
+                        styled_df,
                         height=400,
                         use_container_width=True
                     )
